@@ -1,38 +1,39 @@
-export interface Medication {
-  id: string;
+// src/types/prescription.ts
+
+/**
+ * Une seule ligne de prescription,
+ * correspondant à un médicament et ses modalités.
+ */
+export interface PrescriptionLine {
   nom: string;
-  dosage: string;
+  voie: string;
+  quantite: number;
+  unite: string;
   frequence: string;
   duree: string;
-  instructions?: string;
+  instruction: string;
 }
 
-export interface Prescription {
-  id: string;
-  patient_id: string;
-  consultation_id?: string;
-  professionnel_id: string;
-  date_emission: string;
-  liste_medicaments: Medication[];
-  instructions_generales: string;
-  signature: string;
-  fichier_pdf?: string;
-}
-
+/**
+ * Données envoyées depuis le formulaire d’ordonnance
+ * vers le service/API pour création ou mise à jour.
+ */
 export interface PrescriptionFormData {
   patient_id: string;
-  consultation_id?: string;
-  professionnel_id: string;
-  liste_medicaments: Medication[];
-  instructions_generales: string;
-  signature: string;
+  professional_id: string;
+  consultation_id: string;
+  lines: PrescriptionLine[];
+  instructions: string;
 }
 
-export interface PrescriptionWithDetails extends Prescription {
-  patient_nom: string;
-  patient_prenom: string;
-  professionnel_nom: string;
-  professionnel_prenom: string;
-  professionnel_role: string;
-  consultation_diagnostic?: string;
+/**
+ * Représentation complète d’une ordonnance
+ * telle que stockée ou renvoyée par l’API.
+ */
+export interface Prescription extends PrescriptionFormData {
+  id: string;
+  date_creation: string;      // ISO string
+  date_prescription: string;  // ISO string
+  // Optionnel : qui a créé, etc.
+  created_by?: string;
 }

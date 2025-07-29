@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Save, X, Plus, Trash2, FileText, User, Users, Calendar, Pill } from 'lucide-react';
-import { Prescription, PrescriptionFormData, Medication } from '../types/prescription';
-import { Patient } from '../types/patient';
-import { User as UserType } from '../types/user';
-import { ConsultationWithDetails } from '../types/consultation';
+// src/components/PrescriptionForm.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { Save, X, FileText, Plus, Trash2 } from 'lucide-react';
+import type { PrescriptionFormData, PrescriptionLine } from '../types/prescription';
+import type { Patient } from '../types/patient';
+import type { ConsultationWithDetails } from '../types/consultation';
+import MEDICATIONS_DATA from '../data/medicationsData';
 
 interface PrescriptionFormProps {
-  prescription?: Prescription | null;
+  prescription?: PrescriptionFormData;
   patients: Patient[];
-  professionals: UserType[];
   consultations?: ConsultationWithDetails[];
-  selectedConsultation?: ConsultationWithDetails | null;
-  onSave: (prescriptionData: PrescriptionFormData) => void;
+  selectedConsultation?: ConsultationWithDetails;
+  onSave: (data: PrescriptionFormData) => void;
   onCancel: () => void;
   isLoading?: boolean;
 }
@@ -19,397 +19,279 @@ interface PrescriptionFormProps {
 export const PrescriptionForm: React.FC<PrescriptionFormProps> = ({
   prescription,
   patients,
-  professionals,
   consultations = [],
   selectedConsultation,
   onSave,
   onCancel,
-  isLoading = false
+  isLoading = false,
 }) => {
   const [formData, setFormData] = useState<PrescriptionFormData>({
     patient_id: '',
     consultation_id: '',
-    professionnel_id: '',
-    liste_medicaments: [],
-    instructions_generales: '',
-    signature: ''
+    lines: [{ nom: '', voie: '', quantite: 1, unite: '', frequence: '', duree: '', instruction: '' }],
+    notes: '',
   });
-
   const [errors, setErrors] = useState<Partial<PrescriptionFormData>>({});
+  const [dropdownIdx, setDropdownIdx] = useState<number | null>(null);
+  const wrapperRef = useRef<HTMLFormElement>(null);
 
+  // Ferme dropdown au clic extérieur
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setDropdownIdx(null);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  // Initialisation en édition ou à partir d'une consultation
   useEffect(() => {
     if (prescription) {
-      setFormData({
-        patient_id: prescription.patient_id,
-        consultation_id: prescription.consultation_id || '',
-        professionnel_id: prescription.professionnel_id,
-        liste_medicaments: prescription.liste_medicaments,
-        instructions_generales: prescription.instructions_generales,
-        signature: prescription.signature
-      });
+      setFormData(prescription);
     } else if (selectedConsultation) {
-      // Pré-remplir avec les données de la consultation
-      setFormData(prev => ({
-        ...prev,
+      setFormData(f => ({
+        ...f,
         patient_id: selectedConsultation.patient_id,
-        professionnel_id: selectedConsultation.professionnel_id,
         consultation_id: selectedConsultation.id,
-        signature: `${selectedConsultation.professionnel_prenom} ${selectedConsultation.professionnel_nom}`
       }));
     }
   }, [prescription, selectedConsultation]);
 
-  const validateForm = (): boolean => {
-    const newErrors: Partial<PrescriptionFormData> = {};
-
-    if (!formData.patient_id) newErrors.patient_id = 'Veuillez sélectionner un patient';
-    if (!formData.professionnel_id) newErrors.professionnel_id = 'Veuillez sélectionner un professionnel';
-    if (formData.liste_medicaments.length === 0) {
-      newErrors.liste_medicaments = 'Veuillez ajouter au moins un médicament' as any;
-    }
-    if (!formData.signature.trim()) newErrors.signature = 'La signature est requise';
-
-    // Valider chaque médicament
-    const medicamentErrors = formData.liste_medicaments.some(med => 
-      !med.nom.trim() || !med.dosage.trim() || !med.frequence.trim() || !med.duree.trim()
-    );
-    
-    if (medicamentErrors) {
-      newErrors.liste_medicaments = 'Tous les champs des médicaments sont requis' as any;
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  // Mise à jour des champs génériques
+  const handleField = <K extends keyof PrescriptionFormData>(
+    field: K,
+    value: PrescriptionFormData[K]
+  ) => {
+    setFormData(f => ({ ...f, [field]: value }));
+    setErrors(e => ({ ...e, [field]: undefined }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (validateForm()) {
-      onSave(formData);
-    }
+  // Mise à jour d'une ligne
+  const updateLine = (idx: number, field: keyof PrescriptionLine, value: any) => {
+    setFormData(f => {
+      const lines = [...f.lines];
+      lines[idx] = { ...lines[idx], [field]: value };
+      return { ...f, lines };
+    });
   };
 
-  const handleInputChange = (field: keyof PrescriptionFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: undefined }));
-    }
-  };
-
-  const addMedication = () => {
-    const newMedication: Medication = {
-      id: Date.now().toString(),
-      nom: '',
-      dosage: '',
-      frequence: '',
-      duree: '',
-      instructions: ''
-    };
-    
-    setFormData(prev => ({
-      ...prev,
-      liste_medicaments: [...prev.liste_medicaments, newMedication]
+  const addLine = () => {
+    setFormData(f => ({
+      ...f,
+      lines: [...f.lines, { nom: '', voie: '', quantite: 1, unite: '', frequence: '', duree: '', instruction: '' }],
     }));
   };
 
-  const removeMedication = (medicationId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      liste_medicaments: prev.liste_medicaments.filter(med => med.id !== medicationId)
+  const removeLine = (idx: number) => {
+    setFormData(f => ({
+      ...f,
+      lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines,
     }));
   };
 
-  const updateMedication = (medicationId: string, field: keyof Medication, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      liste_medicaments: prev.liste_medicaments.map(med =>
-        med.id === medicationId ? { ...med, [field]: value } : med
-      )
-    }));
+  // Validation minimale
+  const validate = () => {
+    const e: Partial<PrescriptionFormData> = {};
+    if (!formData.patient_id) e.patient_id = 'Sélectionnez un patient';
+    if (formData.lines.some(l => !l.nom)) e.lines = 'Chaque ligne doit avoir un médicament choisi';
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
-  const selectedPatient = patients.find(p => p.id === formData.patient_id);
-  const selectedProfessional = professionals.find(p => p.id === formData.professionnel_id);
+  const onSubmit = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!validate()) return;
+    onSave(formData);
+  };
+
+  const filteredPatients = patients;
+  const filteredConsults = consultations.filter(c => c.patient_id === formData.patient_id);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
-              <FileText className="h-6 w-6 text-blue-600" />
-              <span>{prescription ? 'Modifier l\'ordonnance' : 'Nouvelle ordonnance'}</span>
-            </h2>
-            <button
-              onClick={onCancel}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="h-6 w-6 text-gray-500" />
-            </button>
-          </div>
-          
-          {selectedConsultation && (
-            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-sm text-blue-800">
-                <strong>Ordonnance basée sur la consultation :</strong> {selectedConsultation.diagnostic} - 
-                {new Date(selectedConsultation.date_consultation).toLocaleDateString('fr-FR')}
-              </p>
-            </div>
-          )}
+      <form
+        ref={wrapperRef}
+        onSubmit={onSubmit}
+        className="bg-white rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-auto p-6 space-y-6"
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold flex items-center space-x-2">
+            <FileText className="h-5 w-5 text-green-600" />
+            <span>{prescription ? 'Modifier' : 'Nouvelle'} ordonnance</span>
+          </h2>
+          <button type="button" onClick={onCancel}>
+            <X className="h-6 w-6 text-gray-600 hover:text-gray-900" />
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Sélection patient et professionnel */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center space-x-1">
-                <User className="h-4 w-4" />
-                <span>Patient *</span>
-              </label>
-              <select
-                value={formData.patient_id}
-                onChange={(e) => handleInputChange('patient_id', e.target.value)}
-                disabled={!!selectedConsultation}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
-                  errors.patient_id ? 'border-red-500' : 'border-gray-300'
-                } ${selectedConsultation ? 'bg-gray-100' : ''}`}
-              >
-                <option value="">Sélectionner un patient</option>
-                {patients.map(patient => (
-                  <option key={patient.id} value={patient.id}>
-                    {patient.prenom} {patient.nom} - {patient.numero_dossier}
-                  </option>
-                ))}
-              </select>
-              {errors.patient_id && <p className="text-red-500 text-sm mt-1">{errors.patient_id}</p>}
-              
-              {selectedPatient && (
-                <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">
-                    <strong>Âge:</strong> {new Date().getFullYear() - new Date(selectedPatient.date_de_naissance).getFullYear()} ans | 
-                    <strong> Groupe sanguin:</strong> {selectedPatient.groupe_sanguin}
-                  </p>
-                  {selectedPatient.antecedents_medicaux && (
-                    <p className="text-sm text-gray-600 mt-1">
-                      <strong>Antécédents:</strong> {selectedPatient.antecedents_medicaux}
-                    </p>
+        {/* Choix du patient */}
+        <div>
+          <label className="font-medium">Patient *</label>
+          <select
+            value={formData.patient_id}
+            onChange={e => handleField('patient_id', e.target.value)}
+            disabled={!!selectedConsultation}
+            className={`mt-1 w-full border rounded p-2 ${errors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
+          >
+            <option value="">-- Choisir --</option>
+            {filteredPatients.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.prenom} {p.nom}
+              </option>
+            ))}
+          </select>
+          {errors.patient_id && <p className="text-red-500 text-sm">{errors.patient_id}</p>}
+        </div>
+
+        {/* Consultation associée */}
+        <div>
+          <label className="font-medium">Consultation (opt.)</label>
+          <select
+            value={formData.consultation_id}
+            onChange={e => handleField('consultation_id', e.target.value)}
+            className="mt-1 w-full border rounded p-2 border-gray-300"
+          >
+            <option value="">-- Aucune --</option>
+            {filteredConsults.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.diagnostic} – {new Date(c.date_consultation).toLocaleDateString('fr-FR')}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Lignes de prescription */}
+        <div>
+          <label className="font-medium">Médicaments *</label>
+          {formData.lines.map((line, i) => {
+            const query = line.nom;
+            const suggestions =
+              query.length > 1
+                ? MEDICATIONS_DATA.filter(m =>
+                    m.nom.toLowerCase().includes(query.toLowerCase())
+                  )
+                : [];
+
+            return (
+              <div key={i} className="flex items-center space-x-2 mt-2 relative">
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    value={line.nom}
+                    onChange={e => {
+                      updateLine(i, 'nom', e.target.value);
+                      setDropdownIdx(e.target.value.trim().length > 0 ? i : null);
+                    }}
+                    onFocus={() => setDropdownIdx(i)}
+                    onBlur={() => setTimeout(() => setDropdownIdx(null), 200)}
+                    placeholder="Chercher un médicament..."
+                    className="w-full border rounded p-2"
+                  />
+                  {dropdownIdx === i && suggestions.length > 0 && (
+                    <ul className="absolute bg-white border rounded shadow w-full max-h-40 overflow-auto z-10">
+                      {suggestions.slice(0, 20).map(m => (
+                        <li
+                          key={m.nom}
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            updateLine(i, 'nom', m.nom);
+                            updateLine(i, 'voie', m.voie ?? '');
+                            updateLine(i, 'quantite', m.quantite ?? 1);
+                            updateLine(i, 'unite', m.unite ?? '');
+                            updateLine(i, 'frequence', m.frequence ?? '');
+                            updateLine(i, 'duree', m.duree ?? '');
+                            updateLine(i, 'instruction', m.instruction ?? '');
+                            setDropdownIdx(null);
+                          }}
+                          className="px-3 py-2 hover:bg-green-100 cursor-pointer flex justify-between"
+                        >
+                          <span>{m.nom}</span>
+                          <small className="text-gray-500">{m.voie}</small>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center space-x-1">
-                <Users className="h-4 w-4" />
-                <span>Professionnel *</span>
-              </label>
-              <select
-                value={formData.professionnel_id}
-                onChange={(e) => handleInputChange('professionnel_id', e.target.value)}
-                disabled={!!selectedConsultation}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
-                  errors.professionnel_id ? 'border-red-500' : 'border-gray-300'
-                } ${selectedConsultation ? 'bg-gray-100' : ''}`}
-              >
-                <option value="">Sélectionner un professionnel</option>
-                {professionals.filter(prof => ['médecin', 'spécialiste'].includes(prof.role)).map(prof => (
-                  <option key={prof.id} value={prof.id}>
-                    {prof.prenom} {prof.nom} - {prof.role}
-                  </option>
-                ))}
-              </select>
-              {errors.professionnel_id && <p className="text-red-500 text-sm mt-1">{errors.professionnel_id}</p>}
-            </div>
-          </div>
-
-          {/* Consultation associée (optionnel) */}
-          {!selectedConsultation && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center space-x-1">
-                <Calendar className="h-4 w-4" />
-                <span>Consultation associée (optionnel)</span>
-              </label>
-              <select
-                value={formData.consultation_id}
-                onChange={(e) => handleInputChange('consultation_id', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              >
-                <option value="">Aucune consultation associée</option>
-                {consultations
-                  .filter(cons => cons.patient_id === formData.patient_id)
-                  .map(consultation => (
-                    <option key={consultation.id} value={consultation.id}>
-                      {consultation.diagnostic} - {new Date(consultation.date_consultation).toLocaleDateString('fr-FR')}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
-
-          {/* Liste des médicaments */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <label className="block text-sm font-medium text-gray-700 flex items-center space-x-1">
-                <Pill className="h-4 w-4" />
-                <span>Médicaments prescrits *</span>
-              </label>
-              <button
-                type="button"
-                onClick={addMedication}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Ajouter un médicament</span>
-              </button>
-            </div>
-
-            {formData.liste_medicaments.length === 0 ? (
-              <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                <Pill className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">Aucun médicament ajouté</p>
-                <button
-                  type="button"
-                  onClick={addMedication}
-                  className="mt-2 text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  Ajouter le premier médicament
+                <input
+                  type="text"
+                  placeholder="voie"
+                  value={line.voie}
+                  onChange={e => updateLine(i, 'voie', e.target.value)}
+                  className="w-20 border rounded p-2"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={line.quantite}
+                  onChange={e => updateLine(i, 'quantite', Number(e.target.value))}
+                  className="w-16 border rounded p-2"
+                />
+                <input
+                  type="text"
+                  placeholder="unité"
+                  value={line.unite}
+                  onChange={e => updateLine(i, 'unite', e.target.value)}
+                  className="w-20 border rounded p-2"
+                />
+                <input
+                  type="text"
+                  placeholder="fréq."
+                  value={line.frequence}
+                  onChange={e => updateLine(i, 'frequence', e.target.value)}
+                  className="w-24 border rounded p-2"
+                />
+                <input
+                  type="text"
+                  placeholder="durée"
+                  value={line.duree}
+                  onChange={e => updateLine(i, 'duree', e.target.value)}
+                  className="w-20 border rounded p-2"
+                />
+                <button type="button" onClick={() => removeLine(i)} className="p-1 text-red-500">
+                  <Trash2 />
                 </button>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {formData.liste_medicaments.map((medication, index) => (
-                  <div key={medication.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-medium text-gray-900">Médicament {index + 1}</h4>
-                      <button
-                        type="button"
-                        onClick={() => removeMedication(medication.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Nom *</label>
-                        <input
-                          type="text"
-                          value={medication.nom}
-                          onChange={(e) => updateMedication(medication.id, 'nom', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Ex: Doliprane"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Dosage *</label>
-                        <input
-                          type="text"
-                          value={medication.dosage}
-                          onChange={(e) => updateMedication(medication.id, 'dosage', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Ex: 500mg"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Fréquence *</label>
-                        <input
-                          type="text"
-                          value={medication.frequence}
-                          onChange={(e) => updateMedication(medication.id, 'frequence', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Ex: 3 fois par jour"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Durée *</label>
-                        <input
-                          type="text"
-                          value={medication.duree}
-                          onChange={(e) => updateMedication(medication.id, 'duree', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Ex: 7 jours"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Instructions particulières</label>
-                      <input
-                        type="text"
-                        value={medication.instructions || ''}
-                        onChange={(e) => updateMedication(medication.id, 'instructions', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="Ex: À prendre après les repas"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {errors.liste_medicaments && <p className="text-red-500 text-sm mt-1">{errors.liste_medicaments as string}</p>}
-          </div>
+            );
+          })}
+          {errors.lines && <p className="text-red-500 text-sm mt-1">{errors.lines}</p>}
+          <button type="button" onClick={addLine} className="mt-2 flex items-center space-x-1 text-green-600">
+            <Plus className="h-4 w-4" /> <span>Ajouter un médicament</span>
+          </button>
+        </div>
 
-          {/* Instructions générales */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center space-x-1">
-              <FileText className="h-4 w-4" />
-              <span>Instructions générales</span>
-            </label>
-            <textarea
-              value={formData.instructions_generales}
-              onChange={(e) => handleInputChange('instructions_generales', e.target.value)}
-              rows={4}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
-              placeholder="Instructions générales, recommandations, précautions..."
-            />
-          </div>
+        {/* Notes libres */}
+        <div>
+          <label className="font-medium">Instructions / Notes</label>
+          <textarea
+            value={formData.notes}
+            onChange={e => handleField('notes', e.target.value)}
+            rows={3}
+            className="mt-1 w-full border rounded p-2 border-gray-300"
+          />
+        </div>
 
-          {/* Signature */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Signature *
-            </label>
-            <input
-              type="text"
-              value={formData.signature}
-              onChange={(e) => handleInputChange('signature', e.target.value)}
-              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
-                errors.signature ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="Nom et titre du prescripteur"
-            />
-            {errors.signature && <p className="text-red-500 text-sm mt-1">{errors.signature}</p>}
-          </div>
-
-          {/* Boutons d'action */}
-          <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-            >
-              {isLoading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              ) : (
-                <Save className="h-5 w-5" />
-              )}
-              <span>{prescription ? 'Mettre à jour' : 'Créer l\'ordonnance'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
+        {/* Footer */}
+        <div className="flex justify-end space-x-4 pt-4 border-t">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 border rounded"
+          >
+            Annuler
+          </button>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50 flex items-center space-x-1"
+          >
+            <Save className="h-4 w-4" />
+            <span>{prescription ? 'Mettre à jour' : 'Créer'}</span>
+          </button>
+        </div>
+      </form>
     </div>
   );
 };
